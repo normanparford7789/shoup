@@ -23,6 +23,8 @@ import {
   Clock,
   Search,
   X as XIcon,
+  CheckCircle,
+  Layers,
 } from 'lucide-react-native';
 import { colors, spacing, radius, typography, shadows } from '@/lib/theme';
 import { useAuth } from '@/lib/AuthContext';
@@ -72,6 +74,9 @@ export default function AdminWithdrawalsScreen() {
   } | null>(null);
   const [adminNotes, setAdminNotes] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchPaying, setBatchPaying] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -113,6 +118,54 @@ export default function AdminWithdrawalsScreen() {
 
   const updateLocalWithdrawal = (id: string, patch: Partial<Withdrawal>) => {
     setWithdrawals(prev => prev.map(w => (w.id === id ? { ...w, ...patch } : w)));
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleBatchPay = async () => {
+    if (selectedIds.length === 0) return;
+    Alert.alert(
+      'Confirm Batch Payout',
+      `Pay ${selectedIds.length} withdrawal request(s)? This will process all selected requests as paid and deduct from user wallets.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Pay All',
+          style: 'default',
+          onPress: async () => {
+            setBatchPaying(true);
+            try {
+              const token = await getAuthToken(); const headers = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+              const response = await fetch(`${ADMIN_API_BASE}/withdrawals/batch-pay`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ ids: selectedIds }),
+              });
+              if (!response.ok) {
+                const errBody = await response.json().catch(() => ({}));
+                throw new Error(errBody.error || 'Batch payout failed');
+              }
+              const result = await response.json();
+              Alert.alert(
+                'Batch Payout Complete',
+                `Success: ${result.successCount}\nFailed: ${result.failCount}${result.errors?.length ? '\n\nErrors:\n' + result.errors.slice(0, 5).join('\n') : ''}`
+              );
+              setSelectedIds([]);
+              setBatchMode(false);
+              await load();
+            } catch (e: any) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setBatchPaying(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleProcess = async () => {
@@ -249,7 +302,16 @@ export default function AdminWithdrawalsScreen() {
           <ChevronLeft size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Withdrawals</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          style={[styles.batchBtn, batchMode && styles.batchBtnActive]}
+          onPress={() => {
+            setBatchMode(!batchMode);
+            setSelectedIds([]);
+          }}
+        >
+          <Layers size={18} color={batchMode ? colors.white : colors.primary[600]} />
+          <Text style={[styles.batchBtnText, batchMode && styles.batchBtnTextActive]}>Batch</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search bar */}
@@ -324,8 +386,23 @@ export default function AdminWithdrawalsScreen() {
           <View style={{ gap: spacing.md }}>
             {filteredWithdrawals.map(w => {
               const statusCfg = STATUS_CONFIG[w.status] ?? STATUS_CONFIG.pending;
+              const isSelected = selectedIds.includes(w.id);
+              const isSelectable = batchMode && w.status === 'pending';
               return (
-                <View key={w.id} style={styles.withdrawalCard}>
+                <TouchableOpacity
+                  key={w.id}
+                  style={[styles.withdrawalCard, isSelectable && isSelected && styles.withdrawalCardSelected]}
+                  activeOpacity={isSelectable ? 0.7 : 1}
+                  onPress={isSelectable ? () => toggleSelection(w.id) : undefined}
+                >
+                  {/* Batch checkbox */}
+                  {isSelectable ? (
+                    <View style={styles.batchCheckbox}>
+                      <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
+                        {isSelected ? <Check size={16} color={colors.white} /> : null}
+                      </View>
+                    </View>
+                  ) : null}
                   {/* Top row: user + amount */}
                   <View style={styles.cardTop}>
                     <View style={styles.cardTopLeft}>
@@ -437,7 +514,7 @@ export default function AdminWithdrawalsScreen() {
                       </Text>
                     </View>
                   ) : null}
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -558,6 +635,26 @@ export default function AdminWithdrawalsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Batch pay floating bar */}
+      {batchMode ? (
+        <View style={styles.batchBar}>
+          <View>
+            <Text style={styles.batchBarCount}>{selectedIds.length} selected</Text>
+            <Text style={styles.batchBarHint}>Tap pending items to select</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.batchPayBtn, selectedIds.length === 0 && styles.batchPayBtnDisabled]}
+            disabled={selectedIds.length === 0 || batchPaying}
+            onPress={handleBatchPay}
+          >
+            <Banknote size={18} color={colors.white} />
+            <Text style={styles.batchPayBtnText}>
+              {batchPaying ? 'Processing…' : `Pay All (${selectedIds.length})`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -948,5 +1045,96 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
     marginTop: spacing.lg,
+  },
+  // Batch button in header
+  batchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary[600],
+    backgroundColor: colors.surface,
+  },
+  batchBtnActive: {
+    backgroundColor: colors.primary[600],
+  },
+  batchBtnText: {
+    ...typography.bodySmall,
+    color: colors.primary[600],
+    fontWeight: '600',
+  },
+  batchBtnTextActive: {
+    color: colors.white,
+  },
+  // Batch checkbox
+  batchCheckbox: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    zIndex: 10,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.neutral[400],
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  checkboxActive: {
+    backgroundColor: colors.primary[600],
+    borderColor: colors.primary[600],
+  },
+  withdrawalCardSelected: {
+    borderColor: colors.primary[600],
+    borderWidth: 2,
+    backgroundColor: colors.primary[50],
+  },
+  // Batch pay bar
+  batchBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    ...shadows.lg,
+  },
+  batchBarCount: {
+    ...typography.h4,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  batchBarHint: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+  batchPayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.primary[600],
+    borderRadius: radius.md,
+  },
+  batchPayBtnDisabled: {
+    backgroundColor: colors.neutral[300],
+  },
+  batchPayBtnText: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '700',
   },
 });

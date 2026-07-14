@@ -32,6 +32,14 @@ import {
   Pencil,
   Trash2,
   X,
+  UserPlus,
+  Mail,
+  KeyRound,
+  Store,
+  Megaphone,
+  ShieldCheck,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 import { colors, spacing, radius, typography, shadows } from '@/lib/theme';
 import { useAuth } from '@/lib/AuthContext';
@@ -98,6 +106,13 @@ export default function AdminUsersScreen() {
   const [restrictionsLoading, setRestrictionsLoading] = useState(false);
   const [restrictionsSaving, setRestrictionsSaving] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Create user modal state
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [createForm, setCreateForm] = useState({ full_name: '', email: '', password: '', role: 'merchant' as UserRole });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -274,6 +289,44 @@ export default function AdminUsersScreen() {
     }
   };
 
+  const handleCreateUser = async () => {
+    if (!createForm.email.trim() || !createForm.password.trim() || !createForm.role) {
+      setCreateError('All fields are required');
+      return;
+    }
+    if (createForm.password.length < 6) {
+      setCreateError('Password must be at least 6 characters');
+      return;
+    }
+    setCreateLoading(true);
+    setCreateError(null);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`${ADMIN_API_BASE}/users/create-merchant`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          email: createForm.email.trim(),
+          password: createForm.password,
+          full_name: createForm.full_name.trim() || createForm.email.split('@')[0],
+          role: createForm.role,
+        }),
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || 'Failed to create user');
+      }
+      setCreateModalVisible(false);
+      setCreateForm({ full_name: '', email: '', password: '', role: 'merchant' });
+      Alert.alert('Success', `${ROLE_LABELS[createForm.role]} account created successfully`);
+      await load();
+    } catch (e: any) {
+      setCreateError(e.message);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
   // ── Filtering ─────────────────────────────────────────────────
   const filteredUsers = users.filter(u => {
     if (filterRole !== 'all' && u.role !== filterRole) return false;
@@ -361,7 +414,13 @@ export default function AdminUsersScreen() {
           <ChevronLeft size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Manage Users</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          style={styles.addUserBtn}
+          onPress={() => { setCreateError(null); setCreateModalVisible(true); }}
+        >
+          <UserPlus size={20} color={colors.white} />
+          <Text style={styles.addUserBtnText}>Add</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search bar */}
@@ -682,6 +741,130 @@ export default function AdminUsersScreen() {
                 )}
               </>
             ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Create User Modal ──────────────────────────────────────── */}
+      <Modal
+        visible={createModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !createLoading && setCreateModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create New Account</Text>
+              <TouchableOpacity
+                style={styles.modalClose}
+                onPress={() => !createLoading && setCreateModalVisible(false)}
+              >
+                <X size={20} color={colors.neutral[500]} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Role selector */}
+            <Text style={styles.inputLabel}>Account Type</Text>
+            <View style={styles.roleSelectorRow}>
+              {([
+                { role: 'merchant', label: 'Merchant', icon: <Store size={18} color={colors.primary[600]} /> },
+                { role: 'publisher', label: 'Publisher', icon: <Megaphone size={18} color={colors.accent[600]} /> },
+                { role: 'admin', label: 'Admin', icon: <ShieldCheck size={18} color={colors.error[600]} /> },
+              ]).map(({ role, label, icon }) => (
+                <TouchableOpacity
+                  key={role}
+                  style={[
+                    styles.roleOption,
+                    createForm.role === role && styles.roleOptionActive,
+                  ]}
+                  onPress={() => setCreateForm({ ...createForm, role: role as UserRole })}
+                >
+                  {icon}
+                  <Text style={[
+                    styles.createRoleOptionText,
+                    createForm.role === role && styles.createRoleOptionTextActive,
+                  ]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Full name */}
+            <Text style={styles.inputLabel}>Full Name</Text>
+            <View style={styles.inputRow}>
+              <UsersIcon size={18} color={colors.neutral[400]} />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="John Doe"
+                value={createForm.full_name}
+                onChangeText={(v) => setCreateForm({ ...createForm, full_name: v })}
+                autoCapitalize="words"
+                editable={!createLoading}
+              />
+            </View>
+
+            {/* Email */}
+            <Text style={styles.inputLabel}>Email Address</Text>
+            <View style={styles.inputRow}>
+              <Mail size={18} color={colors.neutral[400]} />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="user@example.com"
+                value={createForm.email}
+                onChangeText={(v) => setCreateForm({ ...createForm, email: v })}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!createLoading}
+              />
+            </View>
+
+            {/* Password */}
+            <Text style={styles.inputLabel}>Password</Text>
+            <View style={styles.inputRow}>
+              <KeyRound size={18} color={colors.neutral[400]} />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Min 6 characters"
+                value={createForm.password}
+                onChangeText={(v) => setCreateForm({ ...createForm, password: v })}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!createLoading}
+              />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                {showPassword
+                  ? <EyeOff size={18} color={colors.neutral[400]} />
+                  : <Eye size={18} color={colors.neutral[400]} />}
+              </TouchableOpacity>
+            </View>
+
+            {createError ? (
+              <View style={styles.createErrorBox}>
+                <Text style={styles.createErrorText}>{createError}</Text>
+              </View>
+            ) : null}
+
+            <View style={styles.modalActions}>
+              <View style={{ flex: 1 }}>
+                <Button
+                  title="Cancel"
+                  onPress={() => setCreateModalVisible(false)}
+                  variant="outline"
+                  disabled={createLoading}
+                  fullWidth
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button
+                  title="Create Account"
+                  onPress={handleCreateUser}
+                  loading={createLoading}
+                  fullWidth
+                />
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1016,6 +1199,10 @@ const styles = StyleSheet.create({
     borderColor: colors.primary[600],
     backgroundColor: colors.primary[50],
   },
+  createRoleOptionActive: {
+    borderColor: colors.primary[600],
+    backgroundColor: colors.primary[50],
+  },
   roleRadio: {
     width: 22,
     height: 22,
@@ -1097,5 +1284,88 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 80,
     textAlignVertical: 'top',
+  },
+  // Add user button
+  addUserBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.primary[600],
+    borderRadius: radius.md,
+  },
+  addUserBtnText: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '600',
+  },
+  // Create user modal
+  inputLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.sm,
+    marginTop: spacing.md,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.background,
+  },
+  modalInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text,
+    paddingVertical: 0,
+  },
+  roleSelectorRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  createRoleOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  createRoleOptionText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  createRoleOptionTextActive: {
+    color: colors.primary[700],
+    fontWeight: '700',
+  },
+  createErrorBox: {
+    backgroundColor: colors.error[50],
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.error[100],
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  createErrorText: {
+    ...typography.bodySmall,
+    color: colors.error[700],
   },
 });
