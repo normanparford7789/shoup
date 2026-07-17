@@ -184,7 +184,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
       body: JSON.stringify({ email: data.get('email'), password1: data.get('password1'), password2: data.get('password2') })
     });
     if (res.ok) {
-      window.location.href = '/admin';
+      window.location.href = '/admin-panel';
     } else {
       var err = await res.json();
       var el = document.getElementById('error');
@@ -1460,8 +1460,8 @@ loadStats();
 </html>`;
 }
 
-// ─── Admin Panel Route ────────────────────────────────────────────────────────
-app.get('/admin', (req, res) => {
+// ─── Admin Panel Route (at /admin-panel to avoid conflicting with Expo web app) ─
+app.get('/admin-panel', (req, res) => {
   if (!AUTH_EMAIL || !AUTH_PASSWORD1 || !AUTH_PASSWORD2) {
     return res.status(500).send('Server not configured. Set AUTH_EMAIL, AUTH_PASSWORD1, AUTH_PASSWORD2 env vars.');
   }
@@ -1471,29 +1471,40 @@ app.get('/admin', (req, res) => {
   res.type('html').send(getAdminHtml());
 });
 
-// Redirect /admin/* sub-paths to /admin (SPA-like behavior)
-app.get('/admin/*', (req, res) => {
+// Admin panel sub-paths (SPA - redirect to /admin-panel)
+app.get('/admin-panel/*', (req, res) => {
   if (!isAuthenticated(req)) return res.type('html').send(LOGIN_PAGE);
-  res.redirect('/admin');
+  res.redirect('/admin-panel');
 });
 
-// ─── Root Auth Gate + Expo Web App ───────────────────────────────────────────
-app.use((req, res, next) => {
-  if (req.path === '/style-logo.svg' || req.path === '/favicon.svg' || req.path === '/favicon.ico') {
-    return next();
+// ─── Affiliate Redirect (server-side) ─────────────────────────────────────────
+app.get('/ref', async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.redirect('/');
+  try {
+    if (!supabaseAdmin) return res.redirect('/');
+    const { data: links } = await supabaseAdmin
+      .from('affiliate_links')
+      .select('*, product:products(slug)')
+      .eq('affiliate_code', code)
+      .limit(1);
+    const link = (links || [])[0];
+    if (!link) return res.redirect('/');
+    // Record click async (don't block redirect)
+    supabaseAdmin.from('affiliate_clicks').insert({ affiliate_link_id: link.id, product_id: link.product_id }).catch(() => {});
+    supabaseAdmin.from('affiliate_links').update({ clicks_count: (link.clicks_count || 0) + 1 }).eq('id', link.id).catch(() => {});
+    const productSlug = link.product && link.product.slug;
+    const targetPath = productSlug ? '/product/' + productSlug + '?ref=' + encodeURIComponent(code) : '/';
+    res.redirect(targetPath);
+  } catch (e) {
+    res.redirect('/');
   }
-  if (req.path.startsWith('/api/') || req.path.startsWith('/__')) {
-    return next();
-  }
-  if (!AUTH_EMAIL || !AUTH_PASSWORD1 || !AUTH_PASSWORD2) {
-    return res.status(500).send('Server not configured. Set AUTH_EMAIL, AUTH_PASSWORD1, AUTH_PASSWORD2 env vars.');
-  }
-  if (!isAuthenticated(req)) {
-    return res.type('html').send(LOGIN_PAGE);
-  }
-  next();
 });
 
+// ─── Serve Expo Web App ───────────────────────────────────────────────────────
+// The Expo web app handles its own authentication via Supabase.
+// All routes (including /admin, /admin/*) are served to the Expo SPA which
+// routes them client-side based on the user's Supabase auth role.
 const webBuildPath = path.join(__dirname, 'dist');
 if (fs.existsSync(webBuildPath)) {
   app.use(express.static(webBuildPath));
@@ -1502,7 +1513,7 @@ if (fs.existsSync(webBuildPath)) {
   });
 } else {
   app.get('*', (req, res) => {
-    res.send('<!DOCTYPE html><html><head><title>Style</title><link rel="icon" type="image/svg+xml" href="/style-logo.svg"></head><body style="background:#0a0a0a;color:#d4af37;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;gap:16px"><h1 style="font-size:48px;letter-spacing:8px;background:linear-gradient(135deg,#d4af37,#f5d77a,#b8860b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">STYLE</h1><p style="color:#555">Web build not found. Run: npx expo export --platform web</p><a href="/admin" style="color:#d4af37;text-decoration:none;border:1px solid rgba(212,175,55,.3);padding:10px 24px;border-radius:10px;font-size:14px">→ Go to Admin Panel</a></body></html>');
+    res.send('<!DOCTYPE html><html><head><title>Style</title><link rel="icon" type="image/svg+xml" href="/style-logo.svg"></head><body style="background:#0a0a0a;color:#d4af37;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;gap:16px"><h1 style="font-size:48px;letter-spacing:8px;background:linear-gradient(135deg,#d4af37,#f5d77a,#b8860b);-webkit-background-clip:text;-webkit-text-fill-color:transparent">STYLE</h1><p style="color:#555">Web build not found. Run: npx expo export --platform web</p><a href="/admin-panel" style="color:#d4af37;text-decoration:none;border:1px solid rgba(212,175,55,.3);padding:10px 24px;border-radius:10px;font-size:14px">→ Go to Admin Panel</a></body></html>');
   });
 }
 
