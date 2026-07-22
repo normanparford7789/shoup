@@ -33,18 +33,18 @@ Deno.serve(async (req: Request) => {
       .from("profiles")
       .select("role, is_banned")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
     if (!profile || profile.role !== "admin") {
       return jsonResponse({ error: "Admin access required" }, 403);
     }
 
     const url = new URL(req.url);
-    // Fix: correctly extract the path after /admin-api
     const fullPath = url.pathname;
     const adminApiIndex = fullPath.indexOf("/admin-api");
     const path = adminApiIndex >= 0 ? fullPath.slice(adminApiIndex + "/admin-api".length) : fullPath;
     const method = req.method;
+    const searchParams = url.searchParams;
 
     // ── GET /stats ──────────────────────────────────────────────
     if (path === "/stats" && method === "GET") {
@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
         supabase.from("products").select("id", { count: "exact", head: true }),
         supabase.from("orders").select("id,total,status,created_at", { count: "exact" }),
         supabase.from("profiles").select("id,role,is_banned,is_active", { count: "exact" }),
-        supabase.from("wallets").select("balance,total_earned"),
+        supabase.from("wallets").select("available_balance,total_earned"),
         supabase.from("withdrawal_requests").select("amount,status"),
       ]);
 
@@ -65,11 +65,11 @@ Deno.serve(async (req: Request) => {
         .reduce((sum: number, w: any) => sum + parseFloat(w.amount || "0"), 0);
 
       const totalPaidOut = (withdrawalsResult.data || [])
-        .filter((w: any) => w.status === "approved")
+        .filter((w: any) => w.status === "approved" || w.status === "paid")
         .reduce((sum: number, w: any) => sum + parseFloat(w.amount || "0"), 0);
 
       const totalWalletBalance = (walletsResult.data || [])
-        .reduce((sum: number, w: any) => sum + parseFloat(w.balance || "0"), 0);
+        .reduce((sum: number, w: any) => sum + parseFloat(w.available_balance || "0"), 0);
 
       const totalMerchantEarnings = (walletsResult.data || [])
         .reduce((sum: number, w: any) => sum + parseFloat(w.total_earned || "0"), 0);
@@ -198,8 +198,9 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true });
     }
 
-    // ── PUT /users/:id/status ────────────────────────────────────
-    if (path.match(/^\/users\/[^/]+\/status$/) && method === "PUT") {
+    // ── PUT /users/:id/active ────────────────────────────────────
+    // (frontend calls /active; older code had /status — support both)
+    if (path.match(/^\/users\/[^/]+\/(active|status)$/) && method === "PUT") {
       const userId = path.split("/")[2];
       const body = await req.json();
       const { is_active } = body;
@@ -217,66 +218,293 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true });
     }
 
-    // ── PUT /users/:id/restrictions ──────────────────────────────
-    if (path.match(/^\/users\/[^/]+\/restrictions$/) && method === "PUT") {
+    // ── GET /restrictions/:id ────────────────────────────────────
+    if (path.match(/^\/restrictions\/[^/]+$/) && method === "GET") {
+      const merchantId = path.split("/")[2];
+      const { data, error } = await supabase
+        .from("merchant_restrictions")
+        .select("*")
+        .eq("merchant_id", merchantId)
+        .maybeSingle();
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ restrictions: data || null });
+    }
+
+    // ── PUT /restrictions/:id ─────────────────────────────────────
+    if (path.match(/^\/restrictions\/[^/]+$/) && method === "PUT") {
       const merchantId = path.split("/")[2];
       const body = await req.json();
 
       const { error } = await supabase.from("merchant_restrictions").upsert({
         merchant_id: merchantId,
-        ...body,
+        can_upload_products: body.can_upload_products,
+        can_upload_reels: body.can_upload_reels,
+        can_edit_products: body.can_edit_products,
+        can_delete_products: body.can_delete_products,
+        restricted_notes: body.restricted_notes,
         updated_at: new Date().toISOString(),
       });
       if (error) return jsonResponse({ error: error.message }, 500);
       return jsonResponse({ success: true });
     }
 
+    // ── GET /products ────────────────────────────────────────────
+    if (path === "/products" && method === "GET") {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*, merchant:profiles!merchant_id(full_name)")
+        .order("created_at", { ascending: false });
+      if (error) return jsonResponse({ error: error.message }, 500);
+
+      // Fetch first image for each product
+      const productIds = (data || []).map((p: any) => p.id);
+      let imageMap: Record<string, string | null> = {};
+      if (productIds.length > 0) {
+        const { data: images } = await supabase
+          .from("product_images")
+          .select("product_id, image_url, sort_order")
+          .in("product_id", productIds)
+          .order("sort_order", { ascending: true });
+        for (const img of images || []) {
+          if (!imageMap[img.product_id]) {
+            imageMap[img.product_id] = img.image_url;
+          }
+        }
+      }
+
+      // Get stock from variants
+      let stockMap: Record<string, number> = {};
+      if (productIds.length > 0) {
+        const { data: variants } = await supabase
+          .from("product_variants")
+          .select("product_id, stock")
+          .in("product_id", productIds);
+        for (const v of variants || []) {
+          stockMap[v.product_id] = (stockMap[v.product_id] || 0) + (v.stock || 0);
+        }
+      }
+
+      // Fetch merchant emails
+      const merchantIds = [...new Set((data || []).map((p: any) => p.merchant_id).filter(Boolean))];
+      let merchantEmailMap: Record<string, string> = {};
+      if (merchantIds.length > 0) {
+        const { data: authUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of authUsers?.users ?? []) {
+          merchantEmailMap[u.id] = u.email ?? "";
+        }
+      }
+
+      const products = (data || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        price: String(p.price),
+        category: p.category_id || "",
+        image_url: imageMap[p.id] || null,
+        stock: stockMap[p.id] || 0,
+        merchant_id: p.merchant_id,
+        created_at: p.created_at,
+        merchant: p.merchant ? { id: p.merchant_id, full_name: p.merchant.full_name, email: merchantEmailMap[p.merchant_id] ?? "" } : null,
+      }));
+      return jsonResponse({ products });
+    }
+
+    // ── DELETE /products/:id ─────────────────────────────────────
+    if (path.match(/^\/products\/[^/]+$/) && method === "DELETE") {
+      const productId = path.split("/")[2];
+
+      // Delete related images and variants first
+      await supabase.from("product_images").delete().eq("product_id", productId);
+      await supabase.from("product_variants").delete().eq("product_id", productId);
+      await supabase.from("cart_items").delete().eq("product_id", productId);
+      await supabase.from("wishlist_items").delete().eq("product_id", productId);
+
+      const { error } = await supabase.from("products").delete().eq("id", productId);
+      if (error) return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ success: true });
+    }
+
+    // ── GET /orders ─────────────────────────────────────────────
+    if (path === "/orders" && method === "GET") {
+      const statusFilter = searchParams.get("status");
+      let query = supabase
+        .from("orders")
+        .select("*, profile:profiles!user_id(full_name), items:order_items(*)", { count: "exact" })
+        .order("created_at", { ascending: false });
+      if (statusFilter && statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
+      const { data, error } = await query;
+      if (error) return jsonResponse({ error: error.message }, 500);
+
+      // Fetch emails separately (profiles has no email column)
+      const userIds = [...new Set((data || []).map((o: any) => o.user_id).filter(Boolean))];
+      let emailMap: Record<string, string> = {};
+      if (userIds.length > 0) {
+        const { data: authUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of authUsers?.users ?? []) {
+          emailMap[u.id] = u.email ?? "";
+        }
+      }
+
+      const orders = (data || []).map((o: any) => ({
+        id: o.id,
+        user_id: o.user_id,
+        total: String(o.total),
+        status: o.status,
+        created_at: o.created_at,
+        affiliate_code: o.affiliate_code || null,
+        affiliate_user_id: o.affiliate_user_id || null,
+        profile: o.profile ? { ...o.profile, email: emailMap[o.user_id] ?? "" } : null,
+        items: o.items || [],
+      }));
+      return jsonResponse({ orders, count: data?.length || 0 });
+    }
+
     // ── GET /withdrawals ─────────────────────────────────────────
     if (path === "/withdrawals" && method === "GET") {
       const { data, error } = await supabase
         .from("withdrawal_requests")
-        .select("*, profile:profiles(full_name, role)")
+        .select("*, profile:profiles!user_id(full_name, role)")
         .order("created_at", { ascending: false });
       if (error) return jsonResponse({ error: error.message }, 500);
-      return jsonResponse({ withdrawals: data || [] });
+
+      // Fetch emails separately
+      const userIds = [...new Set((data || []).map((w: any) => w.user_id).filter(Boolean))];
+      let emailMap: Record<string, string> = {};
+      if (userIds.length > 0) {
+        const { data: authUsers } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+        for (const u of authUsers?.users ?? []) {
+          emailMap[u.id] = u.email ?? "";
+        }
+      }
+
+      const withdrawals = (data || []).map((w: any) => ({
+        ...w,
+        profile: w.profile ? { ...w.profile, email: emailMap[w.user_id] ?? "" } : null,
+      }));
+      return jsonResponse({ withdrawals });
     }
 
     // ── PUT /withdrawals/:id ─────────────────────────────────────
     if (path.match(/^\/withdrawals\/[^/]+$/) && method === "PUT") {
       const withdrawalId = path.split("/")[2];
       const body = await req.json();
-      const { status, admin_note } = body;
+      const { status, admin_notes } = body;
 
       const { data: withdrawal, error: fetchError } = await supabase
         .from("withdrawal_requests")
         .select("*")
         .eq("id", withdrawalId)
-        .single();
+        .maybeSingle();
       if (fetchError || !withdrawal) return jsonResponse({ error: "Withdrawal not found" }, 404);
 
       const { error } = await supabase
         .from("withdrawal_requests")
-        .update({ status, admin_note: admin_note || null, updated_at: new Date().toISOString() })
+        .update({
+          status,
+          admin_notes: admin_notes || null,
+          processed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", withdrawalId);
       if (error) return jsonResponse({ error: error.message }, 500);
 
-      if (status === "approved" && withdrawal.status !== "approved") {
+      // Deduct from wallet when approved or paid
+      if ((status === "approved" || status === "paid") && withdrawal.status !== "approved" && withdrawal.status !== "paid") {
         const { data: wallet } = await supabase
           .from("wallets")
-          .select("balance")
+          .select("available_balance")
           .eq("user_id", withdrawal.user_id)
-          .single();
+          .maybeSingle();
 
         if (wallet) {
-          const newBalance = Math.max(0, parseFloat(wallet.balance || "0") - parseFloat(withdrawal.amount));
+          const newBalance = Math.max(0, parseFloat(wallet.available_balance || "0") - parseFloat(withdrawal.amount));
+          const updateData: any = {
+            available_balance: newBalance.toFixed(2),
+            updated_at: new Date().toISOString(),
+          };
+          if (status === "paid") {
+            updateData.total_withdrawn = (parseFloat(wallet.available_balance || "0") > parseFloat(withdrawal.amount)
+              ? parseFloat(withdrawal.amount)
+              : parseFloat(wallet.available_balance || "0")).toFixed(2);
+          }
           await supabase
             .from("wallets")
-            .update({ balance: newBalance.toFixed(2) })
+            .update(updateData)
             .eq("user_id", withdrawal.user_id);
         }
       }
 
       return jsonResponse({ success: true });
+    }
+
+    // ── POST /withdrawals/batch-pay ──────────────────────────────
+    if (path === "/withdrawals/batch-pay" && method === "POST") {
+      const body = await req.json();
+      const { ids } = body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return jsonResponse({ error: "No withdrawal IDs provided" }, 400);
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors: string[] = [];
+
+      for (const id of ids) {
+        const { data: withdrawal, error: fetchError } = await supabase
+          .from("withdrawal_requests")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (fetchError || !withdrawal) {
+          failCount++;
+          errors.push(`Withdrawal ${id} not found`);
+          continue;
+        }
+
+        if (withdrawal.status === "paid" || withdrawal.status === "approved") {
+          failCount++;
+          errors.push(`Withdrawal ${id} already processed`);
+          continue;
+        }
+
+        const { error: updateError } = await supabase
+          .from("withdrawal_requests")
+          .update({
+            status: "paid",
+            processed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id);
+        if (updateError) {
+          failCount++;
+          errors.push(`Failed to update ${id}: ${updateError.message}`);
+          continue;
+        }
+
+        const { data: wallet } = await supabase
+          .from("wallets")
+          .select("available_balance, total_withdrawn")
+          .eq("user_id", withdrawal.user_id)
+          .maybeSingle();
+
+        if (wallet) {
+          const newBalance = Math.max(0, parseFloat(wallet.available_balance || "0") - parseFloat(withdrawal.amount));
+          await supabase
+            .from("wallets")
+            .update({
+              available_balance: newBalance.toFixed(2),
+              total_withdrawn: (parseFloat(wallet.total_withdrawn || "0") + parseFloat(withdrawal.amount)).toFixed(2),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", withdrawal.user_id);
+        }
+
+        successCount++;
+      }
+
+      return jsonResponse({ successCount, failCount, errors });
     }
 
     return jsonResponse({ error: "Not found" }, 404);
