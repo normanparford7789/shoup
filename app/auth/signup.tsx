@@ -12,13 +12,14 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronLeft, Mail, Lock, User, Eye, EyeOff, ShoppingBag, Megaphone } from 'lucide-react-native';
+import { GoogleSign } from '@/components/GoogleSign';
 import { colors, spacing, radius, typography } from '@/lib/theme';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/Button';
 import type { UserRole } from '@/lib/supabase';
 
 export default function SignupScreen() {
-  const { signUp } = useAuth();
+  const { signUp, signInWithGoogle } = useAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -162,6 +163,13 @@ export default function SignupScreen() {
             </View>
             <View style={{ height: spacing.md }} />
             <Button title={loading ? 'Creating Account...' : 'Sign Up'} onPress={handleSignup} loading={loading} fullWidth size="lg" />
+            <View style={styles.dividerRow}>
+              <View style={styles.divider} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.divider} />
+            </View>
+            <GoogleSign onPress={signInWithGoogle} />
+            <View style={{ height: spacing.md }} />
             <TouchableOpacity
               style={styles.signinBtn}
               onPress={() => router.push('/auth/login')}
@@ -302,5 +310,21 @@ const styles = StyleSheet.create({
   signinLink: {
     color: colors.primary[600],
     fontWeight: '700',
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+    fontWeight: '600',
   },
 });

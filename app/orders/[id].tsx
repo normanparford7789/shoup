@@ -19,6 +19,8 @@ import {
   RotateCcw,
   MessageCircle,
   Download,
+  FileText,
+  MapPin,
 } from 'lucide-react-native';
 import { colors, spacing, radius, typography, shadows } from '@/lib/theme';
 import { supabase } from '@/lib/supabase';
@@ -191,18 +193,27 @@ export default function OrderDetailScreen() {
           ))}
         </View>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Shipping Address</Text>
+          <Text style={styles.sectionTitle}>Shipping Branch</Text>
           <View style={styles.addressCard}>
             {order.shipping_address ? (
               <>
-                <Text style={styles.addressName}>{order.shipping_address.full_name}</Text>
-                <Text style={styles.addressText}>{order.shipping_address.street}</Text>
+                <View style={styles.branchInfoHeader}>
+                  <MapPin size={18} color={colors.primary[600]} />
+                  <Text style={styles.addressName}>{(order.shipping_address as any)?.governorate ?? ''}</Text>
+                </View>
                 <Text style={styles.addressText}>
-                  {order.shipping_address.city}, {order.shipping_address.country}
+                  {(order.shipping_address as any)?.branch_name ?? ''}
                 </Text>
-                <Text style={styles.addressText}>{order.shipping_address.phone}</Text>
+                <Text style={styles.addressText}>
+                  {(order.shipping_address as any)?.branch_address ?? ''}
+                </Text>
+                {(order.shipping_address as any)?.branch_phone ? (
+                  <Text style={styles.addressText}>Phone: {(order.shipping_address as any)?.branch_phone}</Text>
+                ) : null}
               </>
-            ) : null}
+            ) : (
+              <Text style={styles.addressText}>No shipping info</Text>
+            )}
           </View>
         </View>
         <View style={styles.section}>
@@ -234,24 +245,47 @@ export default function OrderDetailScreen() {
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>${order.total.toFixed(2)}</Text>
             </View>
+            {order.upfront_amount > 0 ? (
+              <>
+                <View style={[styles.summaryRow, { marginTop: spacing.sm }]}>
+                  <Text style={[styles.summaryLabel, { color: colors.success[700], fontWeight: '600' }]}>Paid Upfront (25%)</Text>
+                  <Text style={[styles.summaryValue, { color: colors.success[700], fontWeight: '700' }]}>
+                    ${order.upfront_amount.toFixed(2)}
+                  </Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={[styles.summaryLabel, { color: colors.warning[600], fontWeight: '600' }]}>Due on Delivery (75%)</Text>
+                  <Text style={[styles.summaryValue, { color: colors.warning[600], fontWeight: '600' }]}>
+                    ${order.remaining_amount.toFixed(2)}
+                  </Text>
+                </View>
+              </>
+            ) : null}
             <View style={[styles.summaryRow, { marginTop: spacing.sm }]}>
               <Text style={styles.summaryLabel}>Payment Method</Text>
               <Text style={styles.summaryValue}>
                 {order.payment_method === 'cash_on_delivery' ? 'Cash on Delivery' :
-                 order.payment_method === 'card' ? 'Card' : 'Bank Transfer'}
+                 order.payment_method === 'card' ? 'Card' :
+                 order.payment_method === 'wallet' ? 'Wallet' : 'Bank Transfer'}
               </Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Payment Status</Text>
               <Text style={[styles.summaryValue, {
-                color: order.payment_status === 'paid' ? colors.success[600] : colors.warning[500],
+                color: order.payment_status === 'paid' ? colors.success[600] : 
+                       order.payment_status === 'partial' ? colors.warning[600] : colors.warning[500],
               }]}>
-                {order.payment_status.charAt(0).toUpperCase() + order.payment_status.slice(1)}
+                {order.payment_status === 'partial' ? '25% Paid' :
+                 order.payment_status.charAt(0).toUpperCase() + order.payment_status.slice(1)}
               </Text>
             </View>
           </View>
         </View>
         <View style={styles.actionsRow}>
+          <Button
+            title="View Invoice"
+            onPress={() => router.push(`/invoice/${order.id}`)}
+          />
           {!isCancelled && !isDelivered && order.status === 'pending' ? (
             <Button title="Cancel Order" onPress={handleCancel} variant="outline" />
           ) : null}
@@ -470,11 +504,16 @@ const styles = StyleSheet.create({
     gap: 2,
     ...shadows.sm,
   },
+  branchInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
   addressName: {
     ...typography.bodySmall,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: 2,
   },
   addressText: {
     ...typography.caption,

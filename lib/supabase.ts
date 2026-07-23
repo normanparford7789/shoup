@@ -1,11 +1,13 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
+    storage: AsyncStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
@@ -84,6 +86,10 @@ export type Order = {
   tax: number;
   discount: number;
   total: number;
+  upfront_amount: number;
+  remaining_amount: number;
+  invoice_number: string | null;
+  shipping_branch_id: string | null;
   coupon_code: string | null;
   shipping_address: any;
   payment_method: string;
@@ -93,6 +99,29 @@ export type Order = {
   notes: string | null;
   created_at: string;
   order_items?: OrderItem[];
+};
+
+export type Governorate = {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ShippingBranch = {
+  id: string;
+  governorate_id: string;
+  branch_name: string;
+  address: string;
+  phone: string | null;
+  manager_name: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  governorate?: Governorate;
 };
 
 export type OrderItem = {

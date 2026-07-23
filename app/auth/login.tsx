@@ -12,12 +12,13 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronLeft, Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
+import { GoogleSign } from '@/components/GoogleSign';
 import { colors, spacing, radius, typography, shadows } from '@/lib/theme';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/Button';
 
 export default function LoginScreen() {
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -102,6 +103,8 @@ export default function LoginScreen() {
             <Text style={styles.dividerText}>OR</Text>
             <View style={styles.divider} />
           </View>
+          <GoogleSign onPress={signInWithGoogle} />
+          <View style={{ height: spacing.md }} />
           <TouchableOpacity
             style={styles.signupBtn}
             onPress={() => router.push('/auth/signup')}

@@ -15,7 +15,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.style.app"
+      "bundleIdentifier": "com.style.app",
+      "config": {
+        "google": {
+          "reservedClientId": "YOUR_GOOGLE_CLIENT_ID_HERE"
+        }
+      }
     },
     "android": {
       "package": "com.style.app",

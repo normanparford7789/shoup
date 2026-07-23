@@ -57,6 +57,7 @@ export default function AccountScreen() {
 
   const customerItems = [
     { icon: Package, label: 'My Orders', action: () => router.push('/orders') },
+    { icon: Wallet, label: 'My Wallet', action: () => router.push('/wallet') },
     { icon: Heart, label: 'Wishlist', action: () => router.push('/(tabs)/wishlist') },
     { icon: MapPin, label: 'Addresses', action: () => router.push('/addresses') },
     { icon: Tag, label: 'Coupons & Offers', action: () => router.push('/coupons') },

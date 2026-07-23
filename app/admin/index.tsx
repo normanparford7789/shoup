@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   UserCheck,
   Layers,
+  MapPin,
 } from 'lucide-react-native';
 import { colors, spacing, radius, typography, shadows } from '@/lib/theme';
 import { useAuth } from '@/lib/AuthContext';
@@ -195,6 +196,7 @@ export default function AdminDashboardScreen() {
     { label: 'Manage Withdrawals', description: 'Approve, reject & pay withdrawal requests', icon: <Wallet size={24} color={colors.primary[600]} />, onPress: () => router.push('/admin/withdrawals'), color: colors.warning[50] },
     { label: 'All Orders', description: 'View and manage all platform orders', icon: <ShoppingBag size={24} color={colors.primary[600]} />, onPress: () => router.push('/admin/orders'), color: colors.success[50] },
     { label: 'All Products', description: 'Moderate and manage all products', icon: <Package size={24} color={colors.primary[600]} />, onPress: () => router.push('/admin/products'), color: colors.accent[50] },
+    { label: 'Shipping Branches', description: 'Manage governorates & shipping branches', icon: <MapPin size={24} color={colors.primary[600]} />, onPress: () => router.push('/admin/shipping-branches'), color: colors.primary[50] },
   ];
 
   const orderStatusLabels: Record<string, string> = {
