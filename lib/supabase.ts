@@ -1,10 +1,21 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+// قراءة القيم من expo-constants (مضمّنة في APK عند البناء) أو process.env كبديل
+// هذا يضمن الاتصال بقاعدة البيانات حتى لو لم تُحمَّل متغيرات .env بشكل صحيح أثناء Gradle
+const extra = Constants.expoConfig?.extra ?? {};
 
+const supabaseUrl: string =
+  extra.supabaseUrl ||
+  process.env.EXPO_PUBLIC_SUPABASE_URL ||
+  'https://uiajhhqjyntjpoenhcnx.supabase.co';
+
+const supabaseAnonKey: string =
+  extra.supabaseAnonKey ||
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpYWpoaHFqeW50anBvZW5oY254Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MjQ2MTcsImV4cCI6MjEwMTMwMDYxN30.m1JvtvDxTjV0sguHl78hPMu6tv5gmzOGTuBK7VfI_rw';
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: AsyncStorage,
